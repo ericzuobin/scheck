@@ -8,15 +8,17 @@ import socket
 import json
 import logging
 import sys
+import urllib2
 from logging.handlers import RotatingFileHandler
-
+import daemonocle
 import time
 
 reload(sys)
 sys.setdefaultencoding('utf8')
-LOG_FILE = '/var/log/' + 'scheck.log'
+LOG_FILE = sys.path[0] + os.sep + 'scheck.log'
 logger = logging.getLogger(__name__)
 server_failed_count = {}
+cached_notify = {}
 
 
 def configure_logging(level):
@@ -61,6 +63,19 @@ def check_server(address, port):
         s.close()
 
 
+def send_mail(msg):
+    try:
+        url = config['mail']['url']
+        # 定义要提交的数据
+        data = dict(to='admin@zuobin.net', subject='监控报警' + time.strftime("[%Y-%m-%d %H:%M:%S]", time.localtime()), content=msg)
+        print json.dumps(data)
+        req = urllib2.Request(url, json.dumps(data))
+        req.add_header('Content-Type', 'application/json; charset=utf-8')
+        urllib2.urlopen(req).read()
+    except Exception, e:
+        logger.error("发送邮件错误, %s" % e.message)
+
+
 def notify():
     for key in server_failed_count:
         if key in config['alias']:
@@ -69,10 +84,20 @@ def notify():
             alias = key
         if key in config['retry']:
             if server_failed_count[key] >= config['retry'][key]:
-                print 'Server', key, ' 已停止服务! 重试次数 ', alias
+                waring(alias, key)
         else:
             if server_failed_count[key] >= config['retry']['default']:
-                print 'Server', key, ' 已停止服务! 重试次数 ', alias
+                waring(alias, key)
+
+
+def waring(server_name, key):
+    if key in cached_notify:
+        if time.time() - cached_notify[key] > 600:
+            cached_notify[key] = time.time()
+            send_mail('Server %s 已停止服务! 已重试%d 次失败! ' % (server_name, server_failed_count[key]))
+    else:
+        cached_notify[key] = time.time()
+        send_mail('Server %s 已停止服务! 已重试%d 次失败! ' % (server_name, server_failed_count[key]))
 
 
 def check_service():
@@ -91,25 +116,24 @@ def check_service():
 
 
 def shutdown_callback(message, code):
-    logging.error('监控服务停止')
-    logging.debug(message)
+    logger.error('监控服务停止')
+    logger.debug(message)
 
 
 def main():
-    logging.error('开始监控服务')
+    logger.error('开始监控服务')
     while True:
         check_service()
         notify()
-        time.sleep(15)
+        time.sleep(10)
 
 
 if __name__ == '__main__':
     daemon = daemonocle.Daemon(
         worker=main,
-        pidfile='/var/run/scheck.pid',
+        pidfile=sys.path[0] + os.sep + 'scheck.pid',
         shutdown_callback=shutdown_callback,
     )
     daemon.do_action(sys.argv[1])
-
 
 
