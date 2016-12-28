@@ -10,9 +10,11 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 
+import time
+
 reload(sys)
 sys.setdefaultencoding('utf8')
-LOG_FILE = sys.path[0] + os.sep + 'scheck.log'
+LOG_FILE = '/var/log/' + 'scheck.log'
 logger = logging.getLogger(__name__)
 server_failed_count = {}
 
@@ -87,10 +89,27 @@ def check_service():
                 else:
                     server_failed_count[count_key] = 1
 
-if __name__ == '__main__':
-    for i in range(4):
+
+def shutdown_callback(message, code):
+    logging.error('监控服务停止')
+    logging.debug(message)
+
+
+def main():
+    logging.error('开始监控服务')
+    while True:
         check_service()
-    notify()
+        notify()
+        time.sleep(15)
+
+
+if __name__ == '__main__':
+    daemon = daemonocle.Daemon(
+        worker=main,
+        pidfile='/var/run/scheck.pid',
+        shutdown_callback=shutdown_callback,
+    )
+    daemon.do_action(sys.argv[1])
 
 
 
